@@ -7,6 +7,9 @@ import cashAdvanceRoutes from "./routes/cash-advance.routes.js";
 import categoriesRoutes from "./routes/categories.routes.js";
 import expensesRoutes from "./routes/expenses.routes.js";
 import ledgerRoutes from "./routes/ledger.routes.js";
+import reconciliationRoutes from "./routes/reconciliation.routes.js";
+import auditRoutes from "./routes/audit.routes.js";
+import reportsRoutes from "./routes/reports.routes.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,12 +23,16 @@ app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/cash-advance", cashAdvanceRoutes);
+app.use("/api/cash-advance", reconciliationRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/expenses", expensesRoutes);
 app.use("/api/ledger", ledgerRoutes);
+app.use("/api/audit", auditRoutes);
+app.use("/api/reports", reportsRoutes);
 app.use((error, _req, res, _next) => {
   console.error(error);
-  res.status(error.statusCode ?? 500).json({ error: error.statusCode ? error.message : "Internal server error" });
+  const status = error.statusCode ?? (error.name === "ZodError" || error.name === "MulterError" ? 400 : 500);
+  res.status(status).json({ error: status < 500 ? error.message : "Internal server error" });
 });
 
 const port = Number(process.env.PORT) || 4000;

@@ -6,6 +6,8 @@ import type { Role, SessionUser } from "@/lib/api";
 import CashAdvanceModule from "./CashAdvanceModule";
 import ExpenseModule from "./ExpenseModule";
 import LedgerDashboard from "./LedgerDashboard";
+import ReportsModule from "./ReportsModule";
+import AuditLogViewer from "./AuditLogViewer";
 
 const roleNames: Record<Role, string> = {
   FINANCE_HEAD: "Finance Head", ACCOUNTS_HEAD: "Accounts Head", BRANCH_MANAGER: "Branch Manager",
@@ -35,7 +37,8 @@ export default function Dashboard({ role }: { role: Role }) {
           <a className="active"><span>{icons.dashboard}</span>Overview</a>
           <a href="#cash-advances"><span>{icons.advances}</span>Cash advances</a><a href="#expenses"><span>{icons.expenses}</span>Expenses</a>
           <a href="#expenses"><span>{icons.approvals}</span>Approvals</a><a href="#ledger"><span>{icons.ledger}</span>Ledger</a>
-          <p>MANAGEMENT</p><a><span>{icons.branches}</span>Branches</a><a><span>{icons.reports}</span>Reports</a>
+          <p>MANAGEMENT</p><a><span>{icons.branches}</span>Branches</a><a href="#reports"><span>{icons.reports}</span>Reports</a>
+          {(role === "AUDITOR" || role === "FINANCE_HEAD") && <a href="#audit"><span>◎</span>Audit log</a>}
           {role === "FINANCE_HEAD" && <a href="/register"><span>＋</span>Register user</a>}
         </nav>
         <div className="side-profile"><div className="avatar">{user?.name?.[0] ?? "U"}</div><div><b>{user?.name ?? roleNames[role]}</b><small>{roleNames[role]}</small></div><button onClick={logout} title="Sign out">↪</button></div>
@@ -65,6 +68,8 @@ export default function Dashboard({ role }: { role: Role }) {
         <div id="cash-advances"><CashAdvanceModule role={role} user={user} /></div>
         <div id="expenses"><ExpenseModule role={role} user={user} /></div>
         <div id="ledger"><LedgerDashboard role={role} user={user} /></div>
+        <div id="reports"><ReportsModule role={role} /></div>
+        <div id="audit"><AuditLogViewer role={role} user={user} /></div>
       </div>
     </section>
   </main>;

@@ -7,6 +7,8 @@ import multer from "multer";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { assertNextApprover } from "../lib/approvalChains.js";
+import { logAction } from "../lib/audit.js";
+import { budgetMessage, budgetMode } from "../lib/budgetPolicy.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 
 const router = Router();
@@ -51,9 +53,10 @@ router.post("/", requirePermission("CREATE_EXPENSE"), upload.single("receipt"), 
       const advance = await prisma.cashAdvance.findFirst({ where: { id: parsed.data.cashAdvanceId, branchId: req.user.branchId, status: "DISBURSED" } });
       if (!advance) { await removeUploaded(req.file); return res.status(400).json({ error: "Linked advance must be disbursed and belong to your branch" }); }
     }
-    const expense = await prisma.expense.create({
-      data: { amount: parsed.data.amount, description: parsed.data.description, categoryId: parsed.data.categoryId, cashAdvanceId: parsed.data.cashAdvanceId, receiptUrl: `/uploads/${req.file.filename}`, expenseDate: new Date(), creatorId: req.user.id, branchId: req.user.branchId, status: "PENDING" },
-      include: includeDetails,
+    const expense = await prisma.$transaction(async (tx) => {
+      const created = await tx.expense.create({ data: { amount: parsed.data.amount, description: parsed.data.description, categoryId: parsed.data.categoryId, cashAdvanceId: parsed.data.cashAdvanceId, receiptUrl: `/uploads/${req.file.filename}`, expenseDate: new Date(), creatorId: req.user.id, branchId: req.user.branchId, status: "PENDING" }, include: includeDetails });
+      await logAction(req.user.id, "EXPENSE_CREATED", "Expense", created.id, { branchId: created.branchId, amount: created.amount.toString(), categoryId: created.categoryId, cashAdvanceId: created.cashAdvanceId, receiptUrl: created.receiptUrl }, tx);
+      return created;
     });
     res.status(201).json(expense);
   } catch (error) { await removeUploaded(req.file); next(error); }
@@ -73,17 +76,19 @@ async function decide(req, res, next, status) {
       if (!expense) return null;
       if (expense.status !== "PENDING") throw Object.assign(new Error("Only pending expenses can be reviewed"), { statusCode: 409 });
       const progress = assertNextApprover("EXPENSE", expense.approvalSteps, req.user.role);
-      await tx.approvalStep.create({ data: { expenseId: expense.id, approverId: req.user.id, status, level: progress.level, comments: parsed.data.comment, actedAt: new Date() } });
-      const parentStatus = status === "REJECTED" ? "REJECTED" : progress.isFinal ? "APPROVED" : "PENDING";
-      const updated = await tx.expense.update({ where: { id: expense.id }, data: { status: parentStatus }, include: includeDetails });
       let warning = null;
-      if (status === "APPROVED") {
+      if (status === "APPROVED" && progress.isFinal && budgetMode() !== "off") {
         const monthStart = new Date(Date.UTC(expense.expenseDate.getUTCFullYear(), expense.expenseDate.getUTCMonth(), 1));
         const nextMonth = new Date(Date.UTC(expense.expenseDate.getUTCFullYear(), expense.expenseDate.getUTCMonth() + 1, 1));
         const aggregate = await tx.expense.aggregate({ _sum: { amount: true }, where: { branchId: expense.branchId, categoryId: expense.categoryId, status: "APPROVED", expenseDate: { gte: monthStart, lt: nextMonth } } });
-        const approvedTotal = Number(aggregate._sum.amount ?? 0) + (parentStatus === "APPROVED" ? 0 : Number(expense.amount));
-        if (approvedTotal > Number(expense.category.budgetCap)) warning = `${expense.category.name} monthly budget exceeded: ${approvedTotal} of ${expense.category.budgetCap}`;
+        const projectedTotal = Number(aggregate._sum.amount ?? 0) + Number(expense.amount);
+        warning = budgetMessage(expense.category, projectedTotal);
+        if (warning && budgetMode() === "block") throw Object.assign(new Error(warning), { statusCode: 409 });
       }
+      await tx.approvalStep.create({ data: { expenseId: expense.id, approverId: req.user.id, status, level: progress.level, comments: parsed.data.comment, actedAt: new Date() } });
+      const parentStatus = status === "REJECTED" ? "REJECTED" : progress.isFinal ? "APPROVED" : "PENDING";
+      const updated = await tx.expense.update({ where: { id: expense.id }, data: { status: parentStatus }, include: includeDetails });
+      await logAction(req.user.id, status === "APPROVED" ? "EXPENSE_APPROVED" : "EXPENSE_REJECTED", "Expense", expense.id, { level: progress.level, final: status === "APPROVED" && progress.isFinal, comment: parsed.data.comment ?? null, budgetWarning: warning }, tx);
       return { expense: updated, warning, nextRequiredRole: parentStatus === "PENDING" ? "ACCOUNTS_HEAD" : null };
     });
     if (!result) return res.status(404).json({ error: "Expense not found" });

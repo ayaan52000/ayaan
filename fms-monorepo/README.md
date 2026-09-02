@@ -15,8 +15,10 @@ Development login: `admin` / `admin` (Finance Head). Other seeded accounts and p
 
 ## Phase 0 scope
 
-Included through Phase 2: core schema, JWT login, protected registration, seed data, branch-scoped cash advances and expenses, two-level configurable approvals, transactional disbursement, local receipt uploads, category budget warnings, per-branch ledger balances, role guards, and responsive workflow dashboards.
+Included through Phase 3: core schema, JWT login, protected registration, seed data, branch-scoped cash advances and expenses, two-level approvals, transactional disbursement and settlement, local receipt uploads, configurable category-budget enforcement, per-branch ledgers, scoped CSV reports, audit logging/viewing, role guards, and responsive workflow dashboards.
 
 Receipt files are stored under `backend/uploads/` for local development and served from `http://localhost:4000/uploads/...`.
 
-Not included: cloud receipt storage, opening-fund/deposit workflows, advance settlement, configurable approval chains stored in the database, and reports.
+Budget policy is configured with `BUDGET_ENFORCEMENT=warn`, `block`, or `off` in `backend/.env`; `warn` is the default.
+
+Not included: cloud receipt storage, opening-fund/deposit workflows, database-managed approval-chain configuration, PDF reports, notifications, and advanced analytics.

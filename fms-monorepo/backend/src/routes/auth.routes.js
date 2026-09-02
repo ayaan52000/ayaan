@@ -4,6 +4,7 @@ import jwt from "jsonwebtoken";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
+import { logAction } from "../lib/audit.js";
 
 const router = Router();
 const loginSchema = z.object({ email: z.string().trim().min(1), password: z.string().min(1) });
@@ -47,7 +48,11 @@ router.post("/register", authenticate, requirePermission("CREATE_USER"), async (
       return res.status(400).json({ error: "Active branch not found" });
     }
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await prisma.user.create({ data: { name, email: email.toLowerCase(), passwordHash, role, branchId } });
+    const user = await prisma.$transaction(async (tx) => {
+      const created = await tx.user.create({ data: { name, email: email.toLowerCase(), passwordHash, role, branchId } });
+      await logAction(req.user.id, "USER_REGISTERED", "User", created.id, { email: created.email, role: created.role, branchId: created.branchId }, tx);
+      return created;
+    });
     return res.status(201).json({ id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId });
   } catch (error) {
     if (error?.code === "P2002") return res.status(409).json({ error: "A user with this email already exists" });
