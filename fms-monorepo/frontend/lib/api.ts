@@ -4,11 +4,11 @@ export type SessionUser = { id: string; name: string; email: string; role: Role;
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
-  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
   const isFormData = options.body instanceof FormData;
   const response = await fetch(`${API_URL}${path}`, {
     ...options,
-    headers: { ...(!isFormData ? { "Content-Type": "application/json" } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}), ...options.headers },
+    credentials: "include",
+    headers: { ...(!isFormData ? { "Content-Type": "application/json" } : {}), ...options.headers },
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error ?? "Request failed");
@@ -16,8 +16,14 @@ export async function apiFetch<T = unknown>(path: string, options: RequestInit =
 }
 
 export async function login(email: string, password: string): Promise<SessionUser> {
-  const result = await apiFetch<{ token: string; user: SessionUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
-  localStorage.setItem("token", result.token);
+  const result = await apiFetch<{ user: SessionUser }>("/api/auth/login", { method: "POST", body: JSON.stringify({ email, password }) });
+  localStorage.removeItem("token");
   localStorage.setItem("user", JSON.stringify(result.user));
   return result.user;
+}
+
+export async function logout() {
+  await apiFetch("/api/auth/logout", { method: "POST", body: JSON.stringify({}) }).catch(() => undefined);
+  localStorage.removeItem("token");
+  localStorage.removeItem("user");
 }

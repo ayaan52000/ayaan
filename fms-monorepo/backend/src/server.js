@@ -1,6 +1,10 @@
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
+import cookieParser from "cookie-parser";
+import helmet from "helmet";
+import morgan from "morgan";
+import { env } from "./lib/env.js";
 import authRoutes from "./routes/auth.routes.js";
 import branchRoutes from "./routes/branches.routes.js";
 import cashAdvanceRoutes from "./routes/cash-advance.routes.js";
@@ -10,30 +14,37 @@ import ledgerRoutes from "./routes/ledger.routes.js";
 import reconciliationRoutes from "./routes/reconciliation.routes.js";
 import auditRoutes from "./routes/audit.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
+import notificationsRoutes from "./routes/notifications.routes.js";
+import vouchersRoutes from "./routes/vouchers.routes.js";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-if (!process.env.JWT_SECRET) throw new Error("JWT_SECRET is required");
-
 const app = express();
-app.use(cors({ origin: process.env.FRONTEND_URL ?? "http://localhost:3000" }));
-app.use(express.json());
+if (env.NODE_ENV === "production") app.set("trust proxy", 1);
+app.disable("x-powered-by");
+app.use(helmet({ crossOriginResourcePolicy: { policy: "cross-origin" } }));
+app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
+app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
+app.use(express.json({ limit: "1mb" }));
+app.use(cookieParser());
 app.use("/uploads", express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads")));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/cash-advance", cashAdvanceRoutes);
 app.use("/api/cash-advance", reconciliationRoutes);
+app.use("/api/cash-advance", vouchersRoutes);
 app.use("/api/categories", categoriesRoutes);
 app.use("/api/expenses", expensesRoutes);
 app.use("/api/ledger", ledgerRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/reports", reportsRoutes);
+app.use("/api/notifications", notificationsRoutes);
 app.use((error, _req, res, _next) => {
   console.error(error);
   const status = error.statusCode ?? (error.name === "ZodError" || error.name === "MulterError" ? 400 : 500);
   res.status(status).json({ error: status < 500 ? error.message : "Internal server error" });
 });
 
-const port = Number(process.env.PORT) || 4000;
+const port = env.PORT;
 app.listen(port, () => console.log(`FMS API listening on http://localhost:${port}`));

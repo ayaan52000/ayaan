@@ -5,6 +5,8 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 import { logAction } from "../lib/audit.js";
+import { rateLimit } from "express-rate-limit";
+import { env } from "../lib/env.js";
 
 const router = Router();
 const loginSchema = z.object({ email: z.string().trim().min(1), password: z.string().min(1) });
@@ -16,8 +18,9 @@ const registerSchema = z.object({
   branchId: z.string().min(1).nullable().optional(),
 });
 const branchRoles = new Set(["BRANCH_MANAGER", "DATA_ENTRY_OPERATOR", "PROGRAM_OFFICER"]);
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-8", legacyHeaders: false, message: { error: "Too many login attempts. Try again in 15 minutes." } });
 
-router.post("/login", async (req, res, next) => {
+router.post("/login", loginLimiter, async (req, res, next) => {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid login details" });
@@ -30,10 +33,16 @@ router.post("/login", async (req, res, next) => {
 
     const publicUser = { id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId };
     const token = jwt.sign(publicUser, process.env.JWT_SECRET, { expiresIn: "8h" });
-    return res.json({ token, user: publicUser });
+    res.cookie("fms_session", token, { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "lax", maxAge: 8 * 60 * 60 * 1000, path: "/" });
+    return res.json({ user: publicUser });
   } catch (error) {
     next(error);
   }
+});
+
+router.post("/logout", (_req, res) => {
+  res.clearCookie("fms_session", { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "lax", path: "/" });
+  res.json({ status: "ok" });
 });
 
 router.post("/register", authenticate, requirePermission("CREATE_USER"), async (req, res, next) => {

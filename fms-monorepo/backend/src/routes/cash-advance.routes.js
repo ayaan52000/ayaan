@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { assertNextApprover, nextApproval } from "../lib/approvalChains.js";
 import { logAction } from "../lib/audit.js";
+import { createNotification, notifyRole } from "../lib/notify.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 
 const router = Router();
@@ -41,6 +42,7 @@ router.post("/", requirePermission("CREATE_CASH_ADVANCE"), async (req, res, next
     const advance = await prisma.$transaction(async (tx) => {
       const created = await tx.cashAdvance.create({ data: { branchId: parsed.data.branchId, amount: parsed.data.amount, purpose: parsed.data.purpose, requesterId: req.user.id, status: "REQUESTED" }, include: includeDetails });
       await logAction(req.user.id, "CASH_ADVANCE_CREATED", "CashAdvance", created.id, { branchId: created.branchId, amount: created.amount.toString(), purpose: created.purpose }, tx);
+      await notifyRole("ACCOUNTS_HEAD", `Cash advance ${created.amount} from ${created.branch.name} needs level 1 approval.`, "APPROVAL_PENDING", "CashAdvance", created.id, null, tx);
       return created;
     });
     res.status(201).json(advance);
@@ -74,6 +76,8 @@ router.patch("/:id/approve", requirePermission("APPROVE_CASH_ADVANCE"), async (r
       await tx.approvalStep.create({ data: { cashAdvanceId: advance.id, approverId: req.user.id, status: "APPROVED", level: progress.level, comments: parsed.data.comment, actedAt: new Date() } });
       const updated = await tx.cashAdvance.update({ where: { id: advance.id }, data: { status: progress.isFinal ? "APPROVED" : "REQUESTED" }, include: includeDetails });
       await logAction(req.user.id, "CASH_ADVANCE_APPROVED", "CashAdvance", advance.id, { level: progress.level, final: progress.isFinal, comment: parsed.data.comment ?? null }, tx);
+      if (progress.isFinal) await createNotification(advance.requesterId, `Your cash advance for ${advance.amount} was fully approved.`, "APPROVED", "CashAdvance", advance.id, tx);
+      else await notifyRole("FINANCE_HEAD", `Cash advance ${advance.amount} needs final approval.`, "APPROVAL_PENDING", "CashAdvance", advance.id, null, tx);
       return { cashAdvance: updated, nextRequiredRole: progress.isFinal ? null : nextApproval("CASH_ADVANCE", [...advance.approvalSteps, { status: "APPROVED" }]).requiredRole };
     });
     if (!result) return res.status(404).json({ error: "Cash advance not found" });
@@ -93,6 +97,7 @@ router.patch("/:id/reject", requirePermission("APPROVE_CASH_ADVANCE"), async (re
       await tx.approvalStep.create({ data: { cashAdvanceId: advance.id, approverId: req.user.id, status: "REJECTED", level: progress.level, comments: parsed.data.comment, actedAt: new Date() } });
       const updated = await tx.cashAdvance.update({ where: { id: advance.id }, data: { status: "REJECTED" }, include: includeDetails });
       await logAction(req.user.id, "CASH_ADVANCE_REJECTED", "CashAdvance", advance.id, { level: progress.level, comment: parsed.data.comment ?? null }, tx);
+      await createNotification(advance.requesterId, `Your cash advance for ${advance.amount} was rejected.`, "REJECTED", "CashAdvance", advance.id, tx);
       return { cashAdvance: updated, nextRequiredRole: null };
     });
     if (!result) return res.status(404).json({ error: "Cash advance not found" });
@@ -111,6 +116,7 @@ router.patch("/:id/disburse", requirePermission("WRITE_LEDGER"), async (req, res
       const runningBalance = new Prisma.Decimal(previous?.runningBalance ?? 0).minus(advance.amount);
       const ledgerEntry = await tx.ledgerEntry.create({ data: { type: "DISBURSEMENT", amount: advance.amount, runningBalance, description: `Cash advance: ${advance.purpose}`, branchId: advance.branchId, createdById: req.user.id, cashAdvanceId: advance.id } });
       await logAction(req.user.id, "CASH_ADVANCE_DISBURSED", "CashAdvance", advance.id, { amount: advance.amount.toString(), ledgerEntryId: ledgerEntry.id, runningBalance: runningBalance.toString() }, tx);
+      await createNotification(advance.requesterId, `Your approved cash advance for ${advance.amount} was disbursed.`, "DISBURSED", "CashAdvance", advance.id, tx);
       return tx.cashAdvance.findUnique({ where: { id: advance.id }, include: includeDetails });
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     if (!result) return res.status(404).json({ error: "Cash advance not found" });

@@ -40,6 +40,14 @@ enum LedgerEntryType {
   ADJUSTMENT
 }
 
+enum NotificationType {
+  APPROVAL_PENDING
+  APPROVED
+  REJECTED
+  DISBURSED
+  SETTLED
+}
+
 model Branch {
   id            String        @id @default(cuid())
   name          String
@@ -51,6 +59,8 @@ model Branch {
   cashAdvances  CashAdvance[]
   expenses      Expense[]
   ledgerEntries LedgerEntry[]
+
+  @@index([isActive])
 }
 
 model User {
@@ -69,6 +79,10 @@ model User {
   approvalSteps ApprovalStep[] @relation("ApprovalActor")
   ledgerEntries LedgerEntry[]  @relation("LedgerCreator")
   auditLogs     AuditLog[]     @relation("AuditActor")
+  notifications Notification[]
+
+  @@index([branchId])
+  @@index([role, isActive])
 }
 
 model ExpenseCategory {
@@ -78,6 +92,8 @@ model ExpenseCategory {
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   expenses  Expense[]
+
+  @@index([isActive])
 }
 
 model CashAdvance {
@@ -95,6 +111,10 @@ model CashAdvance {
   approvalSteps ApprovalStep[]
   ledgerEntries LedgerEntry[]
   expenses      Expense[]
+
+  @@index([branchId, status])
+  @@index([createdAt])
+  @@index([requesterId])
 }
 
 model Expense {
@@ -116,6 +136,11 @@ model Expense {
   updatedAt     DateTime        @updatedAt
   approvalSteps ApprovalStep[]
   ledgerEntries LedgerEntry[]
+
+  @@index([branchId, status])
+  @@index([categoryId, expenseDate, status])
+  @@index([cashAdvanceId])
+  @@index([createdAt])
 }
 
 model ApprovalStep {
@@ -134,6 +159,7 @@ model ApprovalStep {
 
   @@unique([cashAdvanceId, level])
   @@unique([expenseId, level])
+  @@index([approverId])
 }
 
 model LedgerEntry {
@@ -151,6 +177,10 @@ model LedgerEntry {
   expenseId      String?
   expense        Expense?        @relation(fields: [expenseId], references: [id])
   createdAt      DateTime        @default(now())
+
+  @@index([branchId, createdAt])
+  @@index([cashAdvanceId])
+  @@index([expenseId])
 }
 
 model AuditLog {
@@ -162,4 +192,22 @@ model AuditLog {
   actorId   String?
   actor     User?    @relation("AuditActor", fields: [actorId], references: [id])
   createdAt DateTime @default(now())
+
+  @@index([entity, createdAt])
+  @@index([actorId, createdAt])
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  userId     String
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message    String
+  type       NotificationType
+  entityType String
+  entityId   String
+  isRead     Boolean          @default(false)
+  createdAt  DateTime         @default(now())
+
+  @@index([userId, isRead, createdAt])
+  @@index([entityType, entityId])
 }

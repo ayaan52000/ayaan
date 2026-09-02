@@ -2,6 +2,7 @@ import { Router } from "express";
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { logAction } from "../lib/audit.js";
+import { createNotification, notifyRole } from "../lib/notify.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 
 const router = Router();
@@ -42,6 +43,8 @@ router.patch("/:id/settle", requirePermission("WRITE_LEDGER"), async (req, res, 
       const claimed = await tx.cashAdvance.updateMany({ where: { id: advance.id, status: "DISBURSED" }, data: { status: "SETTLED" } });
       if (claimed.count !== 1) throw Object.assign(new Error("Cash advance settlement state changed; retry"), { statusCode: 409 });
       await logAction(req.user.id, "CASH_ADVANCE_SETTLED", "CashAdvance", advance.id, { disbursedAmount: advance.amount.toString(), approvedExpenses: approvedTotal.toString(), variance: variance.toString(), ledgerEntryId: reconciliationEntry?.id ?? null }, tx);
+      await createNotification(advance.requesterId, `Your cash advance was settled with variance ${variance}.`, "SETTLED", "CashAdvance", advance.id, tx);
+      await notifyRole("ACCOUNTS_HEAD", `Cash advance ${advance.id.slice(-8)} was settled with variance ${variance}.`, "SETTLED", "CashAdvance", advance.id, null, tx);
       return { id: advance.id, status: "SETTLED", disbursedAmount: advance.amount, totalApprovedExpenses: approvedTotal, variance, ledgerEntry: reconciliationEntry };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     if (!result) return res.status(404).json({ error: "Cash advance not found" });

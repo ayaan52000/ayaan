@@ -2,8 +2,9 @@ import jwt from "jsonwebtoken";
 import { can } from "../lib/permissions.js";
 
 export function authenticate(req, res, next) {
-  const [scheme, token] = (req.headers.authorization ?? "").split(" ");
-  if (scheme !== "Bearer" || !token) {
+  const [scheme, bearerToken] = (req.headers.authorization ?? "").split(" ");
+  const token = req.cookies?.fms_session ?? (scheme === "Bearer" ? bearerToken : null);
+  if (!token) {
     return res.status(401).json({ error: "Authentication required" });
   }
 

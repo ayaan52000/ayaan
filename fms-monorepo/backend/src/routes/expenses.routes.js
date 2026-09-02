@@ -9,6 +9,7 @@ import { prisma } from "../lib/prisma.js";
 import { assertNextApprover } from "../lib/approvalChains.js";
 import { logAction } from "../lib/audit.js";
 import { budgetMessage, budgetMode } from "../lib/budgetPolicy.js";
+import { createNotification, notifyRole } from "../lib/notify.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 
 const router = Router();
@@ -56,6 +57,7 @@ router.post("/", requirePermission("CREATE_EXPENSE"), upload.single("receipt"), 
     const expense = await prisma.$transaction(async (tx) => {
       const created = await tx.expense.create({ data: { amount: parsed.data.amount, description: parsed.data.description, categoryId: parsed.data.categoryId, cashAdvanceId: parsed.data.cashAdvanceId, receiptUrl: `/uploads/${req.file.filename}`, expenseDate: new Date(), creatorId: req.user.id, branchId: req.user.branchId, status: "PENDING" }, include: includeDetails });
       await logAction(req.user.id, "EXPENSE_CREATED", "Expense", created.id, { branchId: created.branchId, amount: created.amount.toString(), categoryId: created.categoryId, cashAdvanceId: created.cashAdvanceId, receiptUrl: created.receiptUrl }, tx);
+      await notifyRole("BRANCH_MANAGER", `Expense ${created.amount} for ${created.category.name} needs level 1 approval.`, "APPROVAL_PENDING", "Expense", created.id, created.branchId, tx);
       return created;
     });
     res.status(201).json(expense);
@@ -89,6 +91,9 @@ async function decide(req, res, next, status) {
       const parentStatus = status === "REJECTED" ? "REJECTED" : progress.isFinal ? "APPROVED" : "PENDING";
       const updated = await tx.expense.update({ where: { id: expense.id }, data: { status: parentStatus }, include: includeDetails });
       await logAction(req.user.id, status === "APPROVED" ? "EXPENSE_APPROVED" : "EXPENSE_REJECTED", "Expense", expense.id, { level: progress.level, final: status === "APPROVED" && progress.isFinal, comment: parsed.data.comment ?? null, budgetWarning: warning }, tx);
+      if (status === "REJECTED") await createNotification(expense.creatorId, `Your expense for ${expense.amount} was rejected.`, "REJECTED", "Expense", expense.id, tx);
+      else if (progress.isFinal) await createNotification(expense.creatorId, `Your expense for ${expense.amount} was fully approved.`, "APPROVED", "Expense", expense.id, tx);
+      else await notifyRole("ACCOUNTS_HEAD", `Expense ${expense.amount} needs final approval.`, "APPROVAL_PENDING", "Expense", expense.id, null, tx);
       return { expense: updated, warning, nextRequiredRole: parentStatus === "PENDING" ? "ACCOUNTS_HEAD" : null };
     });
     if (!result) return res.status(404).json({ error: "Expense not found" });
