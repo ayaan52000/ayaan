@@ -1,0 +1,8 @@
+{
+  "name": "fms-monorepo",
+  "private": true,
+  "scripts": {
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:frontend": "npm --prefix frontend run dev"
+  }
+}

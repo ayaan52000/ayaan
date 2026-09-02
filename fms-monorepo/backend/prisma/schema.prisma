@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  FINANCE_HEAD
+  ACCOUNTS_HEAD
+  BRANCH_MANAGER
+  DATA_ENTRY_OPERATOR
+  PROGRAM_OFFICER
+  AUDITOR
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum CashAdvanceStatus {
+  DRAFT
+  SUBMITTED
+  REQUESTED
+  APPROVED
+  REJECTED
+  DISBURSED
+  SETTLED
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+  DISBURSEMENT
+  REFUND
+  ADJUSTMENT
+}
+
+model Branch {
+  id            String        @id @default(cuid())
+  name          String
+  code          String        @unique
+  isActive      Boolean       @default(true)
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  users         User[]
+  cashAdvances  CashAdvance[]
+  expenses      Expense[]
+  ledgerEntries LedgerEntry[]
+}
+
+model User {
+  id            String         @id @default(cuid())
+  name          String
+  email         String         @unique
+  passwordHash  String
+  role          Role
+  branchId      String?
+  branch        Branch?        @relation(fields: [branchId], references: [id])
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  cashAdvances  CashAdvance[]  @relation("CashAdvanceRequester")
+  expenses      Expense[]      @relation("ExpenseCreator")
+  approvalSteps ApprovalStep[] @relation("ApprovalActor")
+  ledgerEntries LedgerEntry[]  @relation("LedgerCreator")
+  auditLogs     AuditLog[]     @relation("AuditActor")
+}
+
+model ExpenseCategory {
+  id        String    @id @default(cuid())
+  name      String    @unique
+  budgetCap Decimal   @db.Decimal(14, 2)
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+  expenses  Expense[]
+}
+
+model CashAdvance {
+  id            String            @id @default(cuid())
+  amount        Decimal           @db.Decimal(14, 2)
+  purpose       String
+  status        CashAdvanceStatus @default(REQUESTED)
+  requesterId   String
+  requester     User              @relation("CashAdvanceRequester", fields: [requesterId], references: [id])
+  branchId      String
+  branch        Branch            @relation(fields: [branchId], references: [id])
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  disbursedAt   DateTime?
+  approvalSteps ApprovalStep[]
+  ledgerEntries LedgerEntry[]
+  expenses      Expense[]
+}
+
+model Expense {
+  id            String          @id @default(cuid())
+  amount        Decimal         @db.Decimal(14, 2)
+  description   String
+  expenseDate   DateTime
+  status        ApprovalStatus  @default(PENDING)
+  categoryId    String
+  category      ExpenseCategory @relation(fields: [categoryId], references: [id])
+  creatorId     String
+  creator       User            @relation("ExpenseCreator", fields: [creatorId], references: [id])
+  branchId      String
+  branch        Branch          @relation(fields: [branchId], references: [id])
+  cashAdvanceId String?
+  cashAdvance   CashAdvance?    @relation(fields: [cashAdvanceId], references: [id])
+  receiptUrl    String
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+  approvalSteps ApprovalStep[]
+  ledgerEntries LedgerEntry[]
+}
+
+model ApprovalStep {
+  id            String         @id @default(cuid())
+  status        ApprovalStatus @default(PENDING)
+  level         Int
+  comments      String?
+  approverId    String?
+  approver      User?          @relation("ApprovalActor", fields: [approverId], references: [id])
+  cashAdvanceId String?
+  cashAdvance   CashAdvance?   @relation(fields: [cashAdvanceId], references: [id])
+  expenseId     String?
+  expense       Expense?       @relation(fields: [expenseId], references: [id])
+  actedAt       DateTime?
+  createdAt     DateTime       @default(now())
+
+  @@unique([cashAdvanceId, level])
+  @@unique([expenseId, level])
+}
+
+model LedgerEntry {
+  id             String          @id @default(cuid())
+  type           LedgerEntryType
+  amount         Decimal         @db.Decimal(14, 2)
+  runningBalance Decimal         @db.Decimal(14, 2)
+  description    String
+  branchId       String
+  branch         Branch          @relation(fields: [branchId], references: [id])
+  createdById    String
+  createdBy      User            @relation("LedgerCreator", fields: [createdById], references: [id])
+  cashAdvanceId  String?
+  cashAdvance    CashAdvance?    @relation(fields: [cashAdvanceId], references: [id])
+  expenseId      String?
+  expense        Expense?        @relation(fields: [expenseId], references: [id])
+  createdAt      DateTime        @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  entity    String
+  entityId  String?
+  metadata  Json?
+  actorId   String?
+  actor     User?    @relation("AuditActor", fields: [actorId], references: [id])
+  createdAt DateTime @default(now())
+}
