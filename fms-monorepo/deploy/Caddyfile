@@ -5,7 +5,7 @@
 		max_size 6MB
 	}
 
-	@backend path /api/* /uploads/* /health
+	@backend path /api/* /health
 	reverse_proxy @backend backend:4000
 	reverse_proxy frontend:3000
 

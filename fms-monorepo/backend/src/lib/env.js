@@ -1,5 +1,8 @@
 import { z } from "zod";
 
+const optionalString = z.preprocess((value) => value === "" ? undefined : value, z.string().min(1).optional());
+const optionalUrl = z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional());
+
 const weakProductionSecrets = new Set([
   "change-this-development-secret-before-deployment",
   "replace-with-a-long-random-secret",
@@ -16,11 +19,11 @@ const schema = z.object({
   BUDGET_ENFORCEMENT: z.enum(["warn", "block", "off"]).default("warn"),
   EMAIL_NOTIFICATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
   STORAGE_PROVIDER: z.enum(["local", "s3"]).default("local"),
-  STORAGE_BUCKET: z.string().min(1).optional(),
-  STORAGE_ACCESS_KEY: z.string().min(1).optional(),
-  STORAGE_SECRET_KEY: z.string().min(1).optional(),
+  STORAGE_BUCKET: optionalString,
+  STORAGE_ACCESS_KEY: optionalString,
+  STORAGE_SECRET_KEY: optionalString,
   STORAGE_REGION: z.string().min(1).default("us-east-1"),
-  STORAGE_ENDPOINT: z.preprocess((value) => value === "" ? undefined : value, z.string().url().optional()),
+  STORAGE_ENDPOINT: optionalUrl,
 }).superRefine((value, context) => {
   if (value.STORAGE_PROVIDER === "s3") {
     for (const field of ["STORAGE_BUCKET", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"]) {
@@ -28,6 +31,15 @@ const schema = z.object({
     }
   }
   if (value.NODE_ENV !== "production") return;
+
+  if (value.STORAGE_PROVIDER !== "s3") {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["STORAGE_PROVIDER"], message: "Production must use private S3-compatible storage." });
+  }
+  for (const field of ["STORAGE_BUCKET", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"]) {
+    if (value[field] && /(required|change[_-]?me|replace|example|default)/i.test(value[field])) {
+      context.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${field} still contains a production placeholder.` });
+    }
+  }
 
   const normalizedSecret = value.JWT_SECRET.trim().toLowerCase();
   const containsPlaceholder = /(required|change[_-]?me|replace|generate|example|default|development)/i.test(value.JWT_SECRET);

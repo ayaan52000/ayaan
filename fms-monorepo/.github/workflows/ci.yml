@@ -28,6 +28,17 @@ jobs:
       - run: node --check src/server.js
       - run: node --check prisma/seed.js
       - run: node --check prisma/seed.production.js
+      - run: node --check scripts/migrate-local-receipts.js
+      - run: node --check src/lib/receiptSafety.js
+      - run: node --check src/lib/storage.js
+      - run: npm run test:storage
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://user:password@localhost:5432/fms
+          JWT_SECRET: ci-storage-test-secret-with-at-least-32-characters
+          FRONTEND_URL: http://localhost:3000
+          COOKIE_SECURE: "false"
+          STORAGE_PROVIDER: local
 
   frontend:
     runs-on: ubuntu-latest

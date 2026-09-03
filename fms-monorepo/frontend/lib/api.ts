@@ -3,9 +3,14 @@ export type SessionUser = { id: string; name: string; email: string; role: Role;
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 
+export function apiUrl(path: string): string {
+  if (/^https?:\/\//i.test(path) || !API_URL) return path;
+  return `${API_URL}${path.startsWith("/") ? path : `/${path}`}`;
+}
+
 export async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const isFormData = options.body instanceof FormData;
-  const response = await fetch(`${API_URL}${path}`, {
+  const response = await fetch(apiUrl(path), {
     ...options,
     credentials: "include",
     headers: { ...(!isFormData ? { "Content-Type": "application/json" } : {}), ...options.headers },

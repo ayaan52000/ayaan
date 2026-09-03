@@ -31,6 +31,12 @@ services:
       EMAIL_NOTIFICATIONS_ENABLED: "false"
       DEV_SEED_FINANCE_PASSWORD: ${DEV_SEED_FINANCE_PASSWORD:-FinanceDevOnly!123}
       DEV_SEED_USER_PASSWORD: ${DEV_SEED_USER_PASSWORD:-UserDevOnly!12345}
+      STORAGE_PROVIDER: local
+      STORAGE_BUCKET: ""
+      STORAGE_ACCESS_KEY: ""
+      STORAGE_SECRET_KEY: ""
+      STORAGE_REGION: ${STORAGE_REGION:-us-east-1}
+      STORAGE_ENDPOINT: ""
     ports:
       - "4000:4000"
     volumes:

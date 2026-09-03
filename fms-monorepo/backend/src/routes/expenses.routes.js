@@ -18,7 +18,9 @@ const localRoles = new Set(["BRANCH_MANAGER", "PROGRAM_OFFICER", "DATA_ENTRY_OPE
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 },
-  fileFilter: (_req, file, done) => allowedReceiptMimeTypes.has(file.mimetype) ? done(null, true) : done(new Error("Receipt must be JPG, PNG, WebP, or PDF")),
+  fileFilter: (_req, file, done) => allowedReceiptMimeTypes.has(file.mimetype)
+    ? done(null, true)
+    : done(Object.assign(new Error("Receipt must be JPG, PNG, WebP, or PDF"), { statusCode: 400 })),
 });
 const expenseSchema = z.object({
   amount: z.coerce.number().positive().max(999999999999.99),

@@ -12,6 +12,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json ./
 COPY prisma ./prisma
 COPY src ./src
+COPY scripts ./scripts
 RUN npx prisma generate
 RUN mkdir -p uploads
 EXPOSE 4000

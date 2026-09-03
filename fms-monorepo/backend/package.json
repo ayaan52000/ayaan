@@ -11,7 +11,8 @@
     "seed": "prisma db seed",
     "seed:dev": "node prisma/seed.js",
     "seed:production": "node prisma/seed.production.js",
-    "receipts:migrate": "node scripts/migrate-local-receipts.js"
+    "receipts:migrate": "node scripts/migrate-local-receipts.js",
+    "test:storage": "node scripts/test-storage.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1125.0",
@@ -23,7 +24,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "express-rate-limit": "^8.1.0",
-    "file-type": "^22.0.2",
+    "file-type": "^19.6.0",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
     "morgan": "^1.10.1",

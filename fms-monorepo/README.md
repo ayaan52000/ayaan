@@ -29,7 +29,7 @@ Production uses the standalone `docker-compose.prod.yml`; do not combine it with
 1. Point the public DNS A/AAAA record for the FMS domain to the server.
 2. Allow inbound TCP 80/443 and UDP 443. Do not publicly expose PostgreSQL or port 4000.
 3. Copy `.env.production.example` to the ignored `.env.production` file.
-4. Replace every placeholder. Generate `JWT_SECRET` with a cryptographically secure generator (at least 48 characters), use a unique database password, URL-encode it in `DATABASE_URL`, and set the real `FMS_DOMAIN` and `PROD_ADMIN_EMAIL`.
+4. Replace every placeholder. Generate `JWT_SECRET` with a cryptographically secure generator (at least 48 characters), use a unique database password, URL-encode it in `DATABASE_URL`, set the real `FMS_DOMAIN` and `PROD_ADMIN_EMAIL`, and configure a private AWS S3 or Cloudflare R2 bucket.
 5. Validate the rendered configuration:
 
    ```sh
@@ -61,10 +61,22 @@ Backend startup fails fast in production if `JWT_SECRET` is short/default/low-di
 - Development seed refuses to run unless `NODE_ENV=development` and its two password variables contain at least 12 characters.
 - Production seed refuses to run outside `NODE_ENV=production` and creates only one Finance Head account.
 - `BUDGET_ENFORCEMENT` supports `warn`, `block`, or `off`; production defaults to `block`.
-- Local receipts are stored under `backend/uploads/`; production Compose persists them in a named volume.
+- Development uses private local receipt storage under `backend/uploads/`; production requires private S3-compatible storage.
+- Receipt uploads stay in memory, are limited to 5 MB, and must pass MIME, extension, and magic-byte checks.
+- Receipt object keys are never public URLs. Authorized users receive a signed access URL that expires after 15 minutes.
 
-See `docs/phase-6.md` for verification details and the full deployment checklist.
+### Existing receipt migration
+
+After applying the Phase 7 Prisma migration, run the idempotent migration script while the old `uploads` directory/volume is available:
+
+```sh
+docker compose --env-file .env.production -f docker-compose.prod.yml run --rm backend npm run receipts:migrate
+```
+
+The script uploads legacy files, updates each `receiptKey`, and intentionally retains originals for backup. Verify every receipt before manually removing old files.
+
+See `docs/phase-7.md` for storage configuration, migration order, tests, and rollback precautions. Phase 6 deployment hardening remains documented in `docs/phase-6.md`.
 
 ## Current scope limitations
 
-Email delivery, private object storage/signed receipt URLs, malware scanning, opening-fund/deposit workflows, database-managed approval chains, SSO/2FA, multi-currency, mobile applications, and horizontal scaling are not included.
+Email delivery, active malware-scanner integration, opening-fund/deposit workflows, database-managed approval chains, SSO/2FA, multi-currency, mobile applications, and horizontal scaling are not included. A malware-scan integration stub is available for future ClamAV or managed scanning.
