@@ -15,7 +15,7 @@ Development login: `admin` / `admin` (Finance Head). Other seeded accounts and p
 
 ## Phase 0 scope
 
-Included through Phase 5: secure workflows and deployment from Phases 0–4 plus shared animated controls, smooth single-page dashboard navigation, inline ledger details, three persistent color themes, and animated cash-flow/ledger charts.
+Included through Phase 5: secure workflows and deployment from Phases 0–4 plus shared animated controls, separate role-aware dashboard section routes, inline ledger details, three persistent color themes, and animated cash-flow/ledger charts.
 
 Receipt files are stored under `backend/uploads/` for local development and served from `http://localhost:4000/uploads/...`.
 

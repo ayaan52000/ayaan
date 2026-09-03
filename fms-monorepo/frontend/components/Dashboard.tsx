@@ -8,6 +8,7 @@ import { logout as clearSession } from "@/lib/api";
 import CashAdvanceModule from "./CashAdvanceModule";
 import ExpenseModule from "./ExpenseModule";
 import LedgerDashboard from "./LedgerDashboard";
+import BranchesModule from "./BranchesModule";
 import ReportsModule from "./ReportsModule";
 import AuditLogViewer from "./AuditLogViewer";
 import NotificationBell from "./NotificationBell";
@@ -79,7 +80,8 @@ export default function Dashboard({ role, view = "overview" }: { role: Role; vie
         </div></>}
         {view === "cash-advances" && <CashAdvanceModule role={role} user={user} />}
         {(view === "expenses" || view === "approvals") && <ExpenseModule role={role} user={user} />}
-        {(view === "ledger" || view === "branches") && <LedgerDashboard role={role} user={user} />}
+        {view === "ledger" && <LedgerDashboard role={role} user={user} />}
+        {view === "branches" && <BranchesModule role={role} user={user} />}
         {view === "reports" && <ReportsModule role={role} />}
         {view === "audit" && <AuditLogViewer role={role} user={user} />}
       </div>
