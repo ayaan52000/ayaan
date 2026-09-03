@@ -26,6 +26,8 @@ jobs:
         env:
           DATABASE_URL: postgresql://user:password@localhost:5432/fms
       - run: node --check src/server.js
+      - run: node --check prisma/seed.js
+      - run: node --check prisma/seed.production.js
 
   frontend:
     runs-on: ubuntu-latest

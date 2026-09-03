@@ -1,5 +1,6 @@
 import jwt from "jsonwebtoken";
 import { can } from "../lib/permissions.js";
+import { env } from "../lib/env.js";
 
 export function authenticate(req, res, next) {
   const [scheme, bearerToken] = (req.headers.authorization ?? "").split(" ");
@@ -9,7 +10,7 @@ export function authenticate(req, res, next) {
   }
 
   try {
-    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    const payload = jwt.verify(token, env.JWT_SECRET);
     req.user = { id: payload.id, role: payload.role, branchId: payload.branchId };
     next();
   } catch {

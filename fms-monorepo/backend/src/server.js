@@ -16,8 +16,6 @@ import auditRoutes from "./routes/audit.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import vouchersRoutes from "./routes/vouchers.routes.js";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const app = express();
 if (env.NODE_ENV === "production") app.set("trust proxy", 1);
@@ -27,7 +25,6 @@ app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
-app.use("/uploads", express.static(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../uploads")));
 app.get("/health", (_req, res) => res.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/branches", branchRoutes);

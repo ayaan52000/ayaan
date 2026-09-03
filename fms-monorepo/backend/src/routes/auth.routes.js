@@ -19,21 +19,23 @@ const registerSchema = z.object({
 });
 const branchRoles = new Set(["BRANCH_MANAGER", "DATA_ENTRY_OPERATOR", "PROGRAM_OFFICER"]);
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-8", legacyHeaders: false, message: { error: "Too many login attempts. Try again in 15 minutes." } });
+const sessionCookie = { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "strict", maxAge: 8 * 60 * 60 * 1000, path: "/" };
+const clearSessionCookie = { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "strict", path: "/" };
 
 router.post("/login", loginLimiter, async (req, res, next) => {
   try {
     const parsed = loginSchema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json({ error: "Invalid login details" });
 
-    const email = parsed.data.email.toLowerCase() === "admin" ? "finance.head@fms.local" : parsed.data.email.toLowerCase();
+    const email = parsed.data.email.toLowerCase();
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !user.isActive || !(await bcrypt.compare(parsed.data.password, user.passwordHash))) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
     const publicUser = { id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId };
-    const token = jwt.sign(publicUser, process.env.JWT_SECRET, { expiresIn: "8h" });
-    res.cookie("fms_session", token, { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "lax", maxAge: 8 * 60 * 60 * 1000, path: "/" });
+    const token = jwt.sign(publicUser, env.JWT_SECRET, { expiresIn: "8h" });
+    res.cookie("fms_session", token, sessionCookie);
     return res.json({ user: publicUser });
   } catch (error) {
     next(error);
@@ -41,7 +43,7 @@ router.post("/login", loginLimiter, async (req, res, next) => {
 });
 
 router.post("/logout", (_req, res) => {
-  res.clearCookie("fms_session", { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "lax", path: "/" });
+  res.clearCookie("fms_session", clearSessionCookie);
   res.json({ status: "ok" });
 });
 

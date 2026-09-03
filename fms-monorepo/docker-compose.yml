@@ -18,17 +18,19 @@ services:
 
   backend:
     build: ./backend
-    command: ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed && node src/server.js"]
+    command: ["sh", "-c", "npx prisma migrate deploy && npm run seed:dev && node src/server.js"]
     restart: unless-stopped
     environment:
-      NODE_ENV: production
+      NODE_ENV: development
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/fms_db?schema=public
-      JWT_SECRET: ${JWT_SECRET:-change-this-development-secret-before-deployment}
+      JWT_SECRET: ${JWT_SECRET:-development-only-jwt-secret-please-change-1234567890}
       PORT: 4000
-      FRONTEND_URL: http://localhost:3000
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:3000}
       COOKIE_SECURE: "false"
       BUDGET_ENFORCEMENT: ${BUDGET_ENFORCEMENT:-warn}
       EMAIL_NOTIFICATIONS_ENABLED: "false"
+      DEV_SEED_FINANCE_PASSWORD: ${DEV_SEED_FINANCE_PASSWORD:-FinanceDevOnly!123}
+      DEV_SEED_USER_PASSWORD: ${DEV_SEED_USER_PASSWORD:-UserDevOnly!12345}
     ports:
       - "4000:4000"
     volumes:

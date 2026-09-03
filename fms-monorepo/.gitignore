@@ -1,6 +1,10 @@
 node_modules/
 .next/
 .env
+.env.production
+**/.env.production
+.env.local
+**/.env.local
 *.log
 backend/uploads/*
 !backend/uploads/.gitkeep

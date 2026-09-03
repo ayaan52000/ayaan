@@ -1,7 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { unlink } from "node:fs/promises";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
@@ -9,18 +7,18 @@ import { prisma } from "../lib/prisma.js";
 import { assertNextApprover } from "../lib/approvalChains.js";
 import { logAction } from "../lib/audit.js";
 import { budgetMessage, budgetMode } from "../lib/budgetPolicy.js";
+import { env } from "../lib/env.js";
 import { createNotification, notifyRole } from "../lib/notify.js";
+import { allowedReceiptMimeTypes, MAX_RECEIPT_BYTES, safeOriginalName, scanReceiptForMalware, validateReceiptFile } from "../lib/receiptSafety.js";
+import { createCloudSignedReceiptUrl, createLocalSignedReceiptPath, deleteReceipt, readLocalReceipt, uploadReceipt, verifyLocalReceiptSignature } from "../lib/storage.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 
 const router = Router();
-const uploadDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../uploads");
 const localRoles = new Set(["BRANCH_MANAGER", "PROGRAM_OFFICER", "DATA_ENTRY_OPERATOR"]);
-const allowedMimeTypes = new Set(["image/jpeg", "image/png", "image/webp", "application/pdf"]);
-const receiptExtensions = { "image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp", "application/pdf": ".pdf" };
 const upload = multer({
-  storage: multer.diskStorage({ destination: uploadDir, filename: (_req, file, done) => done(null, `${randomUUID()}${receiptExtensions[file.mimetype] ?? ""}`) }),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_req, file, done) => allowedMimeTypes.has(file.mimetype) ? done(null, true) : done(new Error("Receipt must be JPG, PNG, WebP, or PDF")),
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_RECEIPT_BYTES, files: 1 },
+  fileFilter: (_req, file, done) => allowedReceiptMimeTypes.has(file.mimetype) ? done(null, true) : done(new Error("Receipt must be JPG, PNG, WebP, or PDF")),
 });
 const expenseSchema = z.object({
   amount: z.coerce.number().positive().max(999999999999.99),
@@ -38,35 +36,80 @@ const includeDetails = {
 };
 
 function scopeFor(user) { return localRoles.has(user.role) ? { branchId: user.branchId ?? "__no_branch__" } : {}; }
-async function removeUploaded(file) { if (file?.path) await unlink(file.path).catch(() => {}); }
+function publicExpense(expense) {
+  const { receiptKey, ...safeExpense } = expense;
+  return { ...safeExpense, hasReceipt: Boolean(receiptKey) };
+}
 
 router.use(authenticate);
 
 router.post("/", requirePermission("CREATE_EXPENSE"), upload.single("receipt"), async (req, res, next) => {
+  let uploadedKey;
   try {
     const parsed = expenseSchema.safeParse(req.body);
-    if (!parsed.success) { await removeUploaded(req.file); return res.status(400).json({ error: "Invalid expense data", details: parsed.error.flatten() }); }
+    if (!parsed.success) return res.status(400).json({ error: "Invalid expense data", details: parsed.error.flatten() });
     if (!req.file) return res.status(400).json({ error: "A receipt file is required" });
-    if (!req.user.branchId) { await removeUploaded(req.file); return res.status(400).json({ error: "Your user is not assigned to a branch" }); }
+    if (!req.user.branchId) return res.status(400).json({ error: "Your user is not assigned to a branch" });
+
     const category = await prisma.expenseCategory.findFirst({ where: { id: parsed.data.categoryId, isActive: true } });
-    if (!category) { await removeUploaded(req.file); return res.status(404).json({ error: "Expense category not found" }); }
+    if (!category) return res.status(404).json({ error: "Expense category not found" });
     if (parsed.data.cashAdvanceId) {
       const advance = await prisma.cashAdvance.findFirst({ where: { id: parsed.data.cashAdvanceId, branchId: req.user.branchId, status: "DISBURSED" } });
-      if (!advance) { await removeUploaded(req.file); return res.status(400).json({ error: "Linked advance must be disbursed and belong to your branch" }); }
+      if (!advance) return res.status(400).json({ error: "Linked advance must be disbursed and belong to your branch" });
     }
+
+    const verifiedFile = await validateReceiptFile({ buffer: req.file.buffer, originalName: req.file.originalname, declaredMimeType: req.file.mimetype });
+    const scan = await scanReceiptForMalware({ buffer: req.file.buffer, contentType: verifiedFile.contentType, name: verifiedFile.safeName });
+    if (!scan.clean) throw Object.assign(new Error("Receipt failed malware scanning"), { statusCode: 400 });
+
+    const expenseId = randomUUID();
+    uploadedKey = `${req.user.branchId}/${expenseId}/${randomUUID()}-${verifiedFile.safeName}`;
+    await uploadReceipt({ key: uploadedKey, buffer: req.file.buffer, contentType: verifiedFile.contentType });
+
     const expense = await prisma.$transaction(async (tx) => {
-      const created = await tx.expense.create({ data: { amount: parsed.data.amount, description: parsed.data.description, categoryId: parsed.data.categoryId, cashAdvanceId: parsed.data.cashAdvanceId, receiptUrl: `/uploads/${req.file.filename}`, expenseDate: new Date(), creatorId: req.user.id, branchId: req.user.branchId, status: "PENDING" }, include: includeDetails });
-      await logAction(req.user.id, "EXPENSE_CREATED", "Expense", created.id, { branchId: created.branchId, amount: created.amount.toString(), categoryId: created.categoryId, cashAdvanceId: created.cashAdvanceId, receiptUrl: created.receiptUrl }, tx);
+      const created = await tx.expense.create({ data: { id: expenseId, amount: parsed.data.amount, description: parsed.data.description, categoryId: parsed.data.categoryId, cashAdvanceId: parsed.data.cashAdvanceId, receiptKey: uploadedKey, expenseDate: new Date(), creatorId: req.user.id, branchId: req.user.branchId, status: "PENDING" }, include: includeDetails });
+      await logAction(req.user.id, "EXPENSE_CREATED", "Expense", created.id, { branchId: created.branchId, amount: created.amount.toString(), categoryId: created.categoryId, cashAdvanceId: created.cashAdvanceId, receiptStored: true, storageProvider: env.STORAGE_PROVIDER }, tx);
       await notifyRole("BRANCH_MANAGER", `Expense ${created.amount} for ${created.category.name} needs level 1 approval.`, "APPROVAL_PENDING", "Expense", created.id, created.branchId, tx);
       return created;
     });
-    res.status(201).json(expense);
-  } catch (error) { await removeUploaded(req.file); next(error); }
+    uploadedKey = undefined;
+    res.status(201).json(publicExpense(expense));
+  } catch (error) {
+    if (uploadedKey) await deleteReceipt(uploadedKey).catch((cleanupError) => console.error("Could not remove orphan receipt:", cleanupError));
+    next(error);
+  }
 });
 
 router.get("/", async (req, res, next) => {
-  try { res.json(await prisma.expense.findMany({ where: scopeFor(req.user), include: includeDetails, orderBy: { createdAt: "desc" } })); }
-  catch (error) { next(error); }
+  try {
+    const expenses = await prisma.expense.findMany({ where: scopeFor(req.user), include: includeDetails, orderBy: { createdAt: "desc" } });
+    res.json(expenses.map(publicExpense));
+  } catch (error) { next(error); }
+});
+
+router.get("/:id/receipt-url", async (req, res, next) => {
+  try {
+    const expense = await prisma.expense.findFirst({ where: { id: req.params.id, ...scopeFor(req.user) }, select: { id: true, receiptKey: true } });
+    if (!expense) return res.status(404).json({ error: "Expense not found" });
+    const url = env.STORAGE_PROVIDER === "local"
+      ? createLocalSignedReceiptPath(expense.id, expense.receiptKey)
+      : await createCloudSignedReceiptUrl(expense.receiptKey);
+    res.set("Cache-Control", "no-store").json({ url, expiresIn: 900 });
+  } catch (error) { next(error); }
+});
+
+router.get("/:id/receipt", async (req, res, next) => {
+  try {
+    if (env.STORAGE_PROVIDER !== "local") return res.status(404).json({ error: "Local receipt access is disabled" });
+    const expense = await prisma.expense.findFirst({ where: { id: req.params.id, ...scopeFor(req.user) }, select: { id: true, receiptKey: true } });
+    if (!expense) return res.status(404).json({ error: "Expense not found" });
+    if (!verifyLocalReceiptSignature(expense.id, expense.receiptKey, req.query.expires, req.query.signature)) return res.status(403).json({ error: "Receipt link is invalid or expired" });
+
+    const buffer = await readLocalReceipt(expense.receiptKey);
+    const verifiedFile = await validateReceiptFile({ buffer, originalName: expense.receiptKey, declaredMimeType: null });
+    res.set({ "Content-Type": verifiedFile.contentType, "Content-Disposition": `inline; filename="${safeOriginalName(path.basename(expense.receiptKey))}"`, "Cache-Control": "private, no-store" });
+    res.send(buffer);
+  } catch (error) { next(error); }
 });
 
 async function decide(req, res, next, status) {
@@ -94,7 +137,7 @@ async function decide(req, res, next, status) {
       if (status === "REJECTED") await createNotification(expense.creatorId, `Your expense for ${expense.amount} was rejected.`, "REJECTED", "Expense", expense.id, tx);
       else if (progress.isFinal) await createNotification(expense.creatorId, `Your expense for ${expense.amount} was fully approved.`, "APPROVED", "Expense", expense.id, tx);
       else await notifyRole("ACCOUNTS_HEAD", `Expense ${expense.amount} needs final approval.`, "APPROVAL_PENDING", "Expense", expense.id, null, tx);
-      return { expense: updated, warning, nextRequiredRole: parentStatus === "PENDING" ? "ACCOUNTS_HEAD" : null };
+      return { expense: publicExpense(updated), warning, nextRequiredRole: parentStatus === "PENDING" ? "ACCOUNTS_HEAD" : null };
     });
     if (!result) return res.status(404).json({ error: "Expense not found" });
     res.json(result);

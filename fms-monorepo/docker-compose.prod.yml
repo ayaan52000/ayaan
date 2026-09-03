@@ -1,0 +1,72 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+    volumes:
+      - fms_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+
+  backend:
+    build: ./backend
+    command: ["sh", "-c", "npx prisma migrate deploy && npm run seed:production && node src/server.js"]
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET}
+      PORT: 4000
+      FRONTEND_URL: https://${FMS_DOMAIN:?Set FMS_DOMAIN}
+      COOKIE_SECURE: "true"
+      BUDGET_ENFORCEMENT: ${BUDGET_ENFORCEMENT:-block}
+      EMAIL_NOTIFICATIONS_ENABLED: ${EMAIL_NOTIFICATIONS_ENABLED:-false}
+      PROD_ADMIN_EMAIL: ${PROD_ADMIN_EMAIL:?Set PROD_ADMIN_EMAIL}
+      PROD_ADMIN_NAME: ${PROD_ADMIN_NAME:-Initial Finance Head}
+    expose:
+      - "4000"
+    volumes:
+      - fms_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_BACKEND_URL: https://${FMS_DOMAIN:?Set FMS_DOMAIN}
+    restart: unless-stopped
+    expose:
+      - "3000"
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      FMS_DOMAIN: ${FMS_DOMAIN:?Set FMS_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  fms_postgres_data:
+  fms_uploads:
+  caddy_data:
+  caddy_config:

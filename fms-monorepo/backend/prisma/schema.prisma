@@ -131,7 +131,7 @@ model Expense {
   branch        Branch          @relation(fields: [branchId], references: [id])
   cashAdvanceId String?
   cashAdvance   CashAdvance?    @relation(fields: [cashAdvanceId], references: [id])
-  receiptUrl    String
+  receiptKey    String
   createdAt     DateTime        @default(now())
   updatedAt     DateTime        @updatedAt
   approvalSteps ApprovalStep[]
