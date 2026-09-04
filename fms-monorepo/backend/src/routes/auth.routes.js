@@ -17,6 +17,7 @@ const registerSchema = z.object({
   role: z.enum(["FINANCE_HEAD", "ACCOUNTS_HEAD", "BRANCH_MANAGER", "DATA_ENTRY_OPERATOR", "PROGRAM_OFFICER", "AUDITOR"]),
   branchId: z.string().min(1).nullable().optional(),
 });
+const preferencesSchema = z.object({ emailNotificationsEnabled: z.boolean() });
 const branchRoles = new Set(["BRANCH_MANAGER", "DATA_ENTRY_OPERATOR", "PROGRAM_OFFICER"]);
 const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: "draft-8", legacyHeaders: false, message: { error: "Too many login attempts. Try again in 15 minutes." } });
 const sessionCookie = { httpOnly: true, secure: env.COOKIE_SECURE === "true", sameSite: "strict", maxAge: 8 * 60 * 60 * 1000, path: "/" };
@@ -33,7 +34,7 @@ router.post("/login", loginLimiter, async (req, res, next) => {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const publicUser = { id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId };
+    const publicUser = { id: user.id, name: user.name, email: user.email, role: user.role, branchId: user.branchId, emailNotificationsEnabled: user.emailNotificationsEnabled };
     const token = jwt.sign(publicUser, env.JWT_SECRET, { expiresIn: "8h" });
     res.cookie("fms_session", token, sessionCookie);
     return res.json({ user: publicUser });
@@ -45,6 +46,13 @@ router.post("/login", loginLimiter, async (req, res, next) => {
 router.post("/logout", (_req, res) => {
   res.clearCookie("fms_session", clearSessionCookie);
   res.json({ status: "ok" });
+});
+
+router.get("/preferences", authenticate, async (req, res, next) => {
+  try { const user = await prisma.user.findUnique({ where: { id: req.user.id }, select: { emailNotificationsEnabled: true } }); if (!user) return res.status(404).json({ error: "User not found" }); res.json(user); } catch (error) { next(error); }
+});
+router.patch("/preferences", authenticate, async (req, res, next) => {
+  try { const data = preferencesSchema.parse(req.body); const user = await prisma.$transaction(async (tx) => { const updated = await tx.user.update({ where: { id: req.user.id }, data, select: { emailNotificationsEnabled: true } }); await logAction(req.user.id, "EMAIL_PREFERENCE_UPDATED", "User", req.user.id, data, tx); return updated; }); res.json(user); } catch (error) { next(error); }
 });
 
 router.post("/register", authenticate, requirePermission("CREATE_USER"), async (req, res, next) => {

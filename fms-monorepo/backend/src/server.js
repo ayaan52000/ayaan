@@ -16,6 +16,9 @@ import auditRoutes from "./routes/audit.routes.js";
 import reportsRoutes from "./routes/reports.routes.js";
 import notificationsRoutes from "./routes/notifications.routes.js";
 import vouchersRoutes from "./routes/vouchers.routes.js";
+import fundsRoutes from "./routes/funds.routes.js";
+import { emailServiceStatus } from "./lib/email.js";
+import approvalRulesRoutes from "./routes/approval-rules.routes.js";
 
 const app = express();
 if (env.NODE_ENV === "production") app.set("trust proxy", 1);
@@ -25,7 +28,7 @@ app.use(cors({ origin: env.FRONTEND_URL, credentials: true }));
 app.use(morgan(env.NODE_ENV === "production" ? "combined" : "dev"));
 app.use(express.json({ limit: "1mb" }));
 app.use(cookieParser());
-app.get("/health", (_req, res) => res.json({ status: "ok" }));
+app.get("/health", (_req, res) => res.json({ status: "ok", services: { email: emailServiceStatus() } }));
 app.use("/api/auth", authRoutes);
 app.use("/api/branches", branchRoutes);
 app.use("/api/cash-advance", cashAdvanceRoutes);
@@ -37,6 +40,8 @@ app.use("/api/ledger", ledgerRoutes);
 app.use("/api/audit", auditRoutes);
 app.use("/api/reports", reportsRoutes);
 app.use("/api/notifications", notificationsRoutes);
+app.use("/api/funds", fundsRoutes);
+app.use("/api/approval-rules", approvalRulesRoutes);
 app.use((error, _req, res, _next) => {
   console.error(error);
   const status = error.statusCode ?? (error.name === "ZodError" || error.name === "MulterError" ? 400 : 500);

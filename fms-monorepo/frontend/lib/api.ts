@@ -1,5 +1,5 @@
 export type Role = "FINANCE_HEAD" | "ACCOUNTS_HEAD" | "BRANCH_MANAGER" | "DATA_ENTRY_OPERATOR" | "PROGRAM_OFFICER" | "AUDITOR";
-export type SessionUser = { id: string; name: string; email: string; role: Role; branchId: string | null };
+export type SessionUser = { id: string; name: string; email: string; role: Role; branchId: string | null; emailNotificationsEnabled?: boolean };
 
 const API_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:4000";
 

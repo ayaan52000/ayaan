@@ -7,12 +7,13 @@ import Button from "./ui/Button";
 type CashAdvance = {
   id: string; amount: string; purpose: string; status: "REQUESTED" | "APPROVED" | "REJECTED" | "DISBURSED" | "SETTLED";
   createdAt: string; branch: { name: string; code: string }; requester: { name: string; email: string };
-  approvalSteps: { level: number; status: "APPROVED" | "REJECTED"; approver: { name: string; role: Role } | null }[];
+  approvalSteps: { level: number; status: "APPROVED" | "REJECTED"; approver: { name: string; role: Role } | null }[]; nextRequiredRole: Role | null;
 };
 type Reconciliation = { id: string; status: string; disbursedAmount: string; totalApprovedExpenses: string; variance: string; hasPendingExpenses: boolean; branch: { name: string }; expenses: { id: string; amount: string; status: string; description: string }[] };
+type Fund = { id: string; donorName: string; grantName: string; currency: string; remaining: string };
 
 const requesterRoles: Role[] = ["BRANCH_MANAGER", "PROGRAM_OFFICER"];
-const reviewerRoles: Role[] = ["FINANCE_HEAD", "ACCOUNTS_HEAD"];
+const reviewerRoles: Role[] = ["FINANCE_HEAD", "ACCOUNTS_HEAD", "BRANCH_MANAGER", "DATA_ENTRY_OPERATOR", "PROGRAM_OFFICER", "AUDITOR"];
 
 export default function CashAdvanceModule({ role, user }: { role: Role; user: SessionUser | null }) {
   const [items, setItems] = useState<CashAdvance[]>([]);
@@ -21,14 +22,17 @@ export default function CashAdvanceModule({ role, user }: { role: Role; user: Se
   const [workingId, setWorkingId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [reconciliation, setReconciliation] = useState<Reconciliation | null>(null);
+  const [funds, setFunds] = useState<Fund[]>([]);
+  const [amount, setAmount] = useState(0);
+  const [fundId, setFundId] = useState("");
   const canRequest = requesterRoles.includes(role);
   const canReview = reviewerRoles.includes(role);
 
   const load = useCallback(async () => {
-    try { setItems(await apiFetch<CashAdvance[]>("/api/cash-advance")); }
+    try { const [rows, fundRows] = await Promise.all([apiFetch<CashAdvance[]>("/api/cash-advance"), canRequest ? apiFetch<Fund[]>("/api/funds?status=ACTIVE") : Promise.resolve([])]); setItems(rows); setFunds(fundRows); }
     catch (error) { setMessage({ type: "error", text: error instanceof Error ? error.message : "Could not load requests" }); }
     finally { setLoading(false); }
-  }, []);
+  }, [canRequest]);
 
   useEffect(() => { if (user && (canRequest || canReview || role === "AUDITOR" || role === "DATA_ENTRY_OPERATOR")) load(); }, [user, canRequest, canReview, role, load]);
 
@@ -37,8 +41,8 @@ export default function CashAdvanceModule({ role, user }: { role: Role; user: Se
     if (!user?.branchId) { setSubmitting(false); return setMessage({ type: "error", text: "Your user is not assigned to a branch." }); }
     const form = event.currentTarget; const data = new FormData(form);
     try {
-      await apiFetch("/api/cash-advance", { method: "POST", body: JSON.stringify({ branchId: user.branchId, amount: Number(data.get("amount")), purpose: data.get("purpose") }) });
-      form.reset(); setMessage({ type: "success", text: "Cash advance request submitted successfully." }); await load();
+      const result = await apiFetch<{warning:string|null}>("/api/cash-advance", { method: "POST", body: JSON.stringify({ branchId: user.branchId, amount: Number(data.get("amount")), purpose: data.get("purpose"), fundId: data.get("fundId") }) });
+      form.reset(); setAmount(0); setFundId(""); setMessage({ type: result.warning ? "error" : "success", text: result.warning ?? "Cash advance request submitted successfully." }); await load();
     } catch (error) { setMessage({ type: "error", text: error instanceof Error ? error.message : "Submission failed" }); }
     finally { setSubmitting(false); }
   }
@@ -76,8 +80,8 @@ export default function CashAdvanceModule({ role, user }: { role: Role; user: Se
     <div className="module-heading"><div><span>PHASE 1 WORKFLOW</span><h2>Cash advances</h2><p>{canRequest ? "Submit a request and track its progress." : "Review, approve and disburse branch requests."}</p></div>{canReview && <strong>{items.filter((item) => item.status === "REQUESTED").length} pending</strong>}</div>
     {message && <div className={`inline-message ${message.type}`}>{message.text}</div>}
     {reconciliation && <div className="settlement-panel"><div><span>Settlement preview · {reconciliation.branch.name}</span><strong>${Number(reconciliation.disbursedAmount).toLocaleString()} disbursed</strong></div><div><span>Approved expenses</span><strong>${Number(reconciliation.totalApprovedExpenses).toLocaleString()}</strong></div><div><span>Variance</span><strong className={Number(reconciliation.variance) < 0 ? "negative" : ""}>${Number(reconciliation.variance).toLocaleString()}</strong></div><div className="settlement-actions"><Button onClick={() => setReconciliation(null)}>Cancel</Button><Button disabled={reconciliation.hasPendingExpenses || workingId === reconciliation.id} onClick={settle}>{reconciliation.hasPendingExpenses ? "Pending expenses remain" : "Confirm settlement"}</Button></div></div>}
-    {canRequest && <form className="advance-form" onSubmit={submit}><label>Amount (USD)<input name="amount" type="number" min="0.01" step="0.01" placeholder="2,500" required /></label><label>Purpose<input name="purpose" minLength={3} maxLength={500} placeholder="e.g. Field visit expenses" required /></label><Button type="submit" disabled={submitting}>{submitting ? "Submitting…" : "Submit request"} <span>→</span></Button></form>}
+    {canRequest && <form className="advance-form fund-advance-form" onSubmit={submit}><label>Amount<input name="amount" type="number" min="0.01" step="0.01" placeholder="2,500" required onChange={e=>setAmount(Number(e.target.value))}/></label><label>Fund / grant (optional)<select name="fundId" value={fundId} onChange={e=>setFundId(e.target.value)}><option value="">Unrestricted / no fund</option>{funds.map(f=><option key={f.id} value={f.id}>{f.grantName} · {f.currency} {Number(f.remaining).toLocaleString()} left</option>)}</select>{fundId&&amount>Number(funds.find(f=>f.id===fundId)?.remaining??0)&&<small className="fund-warning">Requested amount exceeds available allocation.</small>}</label><label>Purpose<input name="purpose" minLength={3} maxLength={500} placeholder="e.g. Field visit expenses" required /></label><Button type="submit" disabled={submitting}>{submitting ? "Submitting…" : "Submit request"} <span>→</span></Button></form>}
     <div className="advance-table-wrap"><table className="advance-table"><thead><tr><th>Branch</th><th>Requested by</th><th>Purpose</th><th>Amount</th><th>Status</th>{canReview && <th>Actions</th>}</tr></thead><tbody>
-      {loading ? <tr><td colSpan={6}>Loading requests…</td></tr> : items.length === 0 ? <tr><td className="empty-row" colSpan={6}>No cash advance requests yet.</td></tr> : items.map((item) => { const nextRole: Role | null = item.status === "REQUESTED" ? (item.approvalSteps.length === 0 ? "ACCOUNTS_HEAD" : "FINANCE_HEAD") : null; const canAct = nextRole === role; return <tr key={item.id}><td><b>{item.branch.name}</b><small>{item.branch.code}</small></td><td><b>{item.requester.name}</b><small>{item.requester.email}</small></td><td className="purpose-cell">{item.purpose}</td><td className="amount-cell">${Number(item.amount).toLocaleString()}</td><td><span className={`status-pill ${item.status.toLowerCase()}`}>{item.status}</span>{nextRole && <small>Next: {nextRole.replaceAll("_", " ")}</small>}{(item.status === "DISBURSED" || item.status === "SETTLED") && <Button className="voucher-link" onClick={() => downloadVoucher(item.id)}>PDF voucher</Button>}</td>{canReview && <td><div className="row-actions">{item.status === "REQUESTED" && canAct && <><Button disabled={workingId === item.id} onClick={() => action(item.id, "approve")}>Approve L{item.approvalSteps.length + 1}</Button><Button className="reject" disabled={workingId === item.id} onClick={() => action(item.id, "reject")}>Reject</Button></>}{item.status === "APPROVED" && <Button className="disburse" disabled={workingId === item.id} onClick={() => action(item.id, "disburse")}>Disburse</Button>}{item.status === "DISBURSED" && role === "ACCOUNTS_HEAD" && <Button className="settle" disabled={workingId === item.id} onClick={() => previewSettlement(item.id)}>Reconcile</Button>}{item.status === "REQUESTED" && !canAct && <small>Waiting for {nextRole?.replaceAll("_", " ")}</small>}</div></td>}</tr>; })}</tbody></table></div>
+      {loading ? <tr><td colSpan={6}>Loading requests…</td></tr> : items.length === 0 ? <tr><td className="empty-row" colSpan={6}>No cash advance requests yet.</td></tr> : items.map((item) => { const nextRole = item.nextRequiredRole; const canAct = nextRole === role; return <tr key={item.id}><td><b>{item.branch.name}</b><small>{item.branch.code}</small></td><td><b>{item.requester.name}</b><small>{item.requester.email}</small></td><td className="purpose-cell">{item.purpose}</td><td className="amount-cell">${Number(item.amount).toLocaleString()}</td><td><span className={`status-pill ${item.status.toLowerCase()}`}>{item.status}</span>{nextRole && <small>Next: {nextRole.replaceAll("_", " ")}</small>}{(item.status === "DISBURSED" || item.status === "SETTLED") && <Button className="voucher-link" onClick={() => downloadVoucher(item.id)}>PDF voucher</Button>}</td>{canReview && <td><div className="row-actions">{item.status === "REQUESTED" && canAct && <><Button disabled={workingId === item.id} onClick={() => action(item.id, "approve")}>Approve L{item.approvalSteps.length + 1}</Button><Button className="reject" disabled={workingId === item.id} onClick={() => action(item.id, "reject")}>Reject</Button></>}{item.status === "APPROVED" && <Button className="disburse" disabled={workingId === item.id} onClick={() => action(item.id, "disburse")}>Disburse</Button>}{item.status === "DISBURSED" && role === "ACCOUNTS_HEAD" && <Button className="settle" disabled={workingId === item.id} onClick={() => previewSettlement(item.id)}>Reconcile</Button>}{item.status === "REQUESTED" && !canAct && <small>Waiting for {nextRole?.replaceAll("_", " ")}</small>}</div></td>}</tr>; })}</tbody></table></div>
   </section>;
 }

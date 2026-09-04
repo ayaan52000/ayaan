@@ -3,6 +3,7 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { authenticate, requirePermission } from "../middleware/auth.js";
 import PDFDocument from "pdfkit";
+import { fundTotals } from "../lib/funds.js";
 
 const router = Router();
 const localRoles = new Set(["BRANCH_MANAGER", "PROGRAM_OFFICER", "DATA_ENTRY_OPERATOR"]);
@@ -31,5 +32,23 @@ router.get("/branch-summary.pdf", requirePermission("VIEW_LEDGER"), async (_req,
     doc.end();
   } catch (error) { next(error); }
 });
+
+const fundReportSchema = z.object({ fundId: z.string().min(1) });
+async function fundReport(fundId) {
+  const fund = await prisma.fund.findUnique({ where: { id: fundId }, include: { expenses: { where: { status: "APPROVED" }, include: { category: true } } } });
+  if (!fund) return null;
+  const totals = await fundTotals(prisma, fund.id);
+  const categories = new Map();
+  for (const expense of fund.expenses) categories.set(expense.category.name, (categories.get(expense.category.name) ?? 0) + Number(expense.amount));
+  return { fund, totals, categories: [...categories.entries()].map(([category, amount]) => ({ category, amount })) };
+}
+router.get("/fund-utilization.csv", requirePermission("VIEW_LEDGER"), async (req, res, next) => { try {
+  const { fundId } = fundReportSchema.parse(req.query); const report = await fundReport(fundId); if (!report) return res.status(404).json({ error: "Fund not found" });
+  const { fund, totals, categories } = report; sendCsv(res, `fund-utilization-${fund.id}.csv`, ["Donor", "Grant", "Currency", "Grant Amount", "Spent", "Remaining", "Category", "Category Spend"], (categories.length ? categories : [{ category: "No approved expenses", amount: 0 }]).map((item) => [fund.donorName, fund.grantName, fund.currency, fund.totalAmount, totals.spent, totals.remaining, item.category, item.amount]));
+} catch (error) { next(error); } });
+router.get("/fund-utilization.pdf", requirePermission("VIEW_LEDGER"), async (req, res, next) => { try {
+  const { fundId } = fundReportSchema.parse(req.query); const report = await fundReport(fundId); if (!report) return res.status(404).json({ error: "Fund not found" }); const { fund, totals, categories } = report;
+  res.set({ "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="fund-utilization-${fund.id}.pdf"` }); const doc = new PDFDocument({ margin: 48, size: "A4" }); doc.pipe(res); doc.fontSize(21).fillColor("#332070").text("Fund Utilization Report"); doc.moveDown(.4).fontSize(11).fillColor("#333").text(`${fund.donorName} · ${fund.grantName}`).fontSize(9).fillColor("#666").text(`Period: ${fund.startDate.toISOString().slice(0, 10)} to ${fund.endDate.toISOString().slice(0, 10)} · Generated ${new Date().toISOString().slice(0, 10)}`).moveDown(1.5); const money = (v) => `${fund.currency} ${Number(v).toLocaleString(undefined, { minimumFractionDigits: 2 })}`; doc.fontSize(12).fillColor("#222").text(`Grant amount: ${money(fund.totalAmount)}`).text(`Spent: ${money(totals.spent)}`).text(`Remaining: ${money(totals.remaining)}`).moveDown(1.4).fontSize(14).fillColor("#332070").text("Approved expense categories").moveDown(.6); if (!categories.length) doc.fontSize(10).fillColor("#555").text("No approved expenses recorded."); for (const item of categories) doc.fontSize(10).fillColor("#222").text(item.category, { continued: true }).text(money(item.amount), { align: "right" }); doc.end();
+} catch (error) { next(error); } });
 
 export default router;

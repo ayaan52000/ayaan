@@ -16,6 +16,13 @@ async function main() {
   const name = process.env.PROD_ADMIN_NAME?.trim() || "Initial Finance Head";
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) fail("PROD_ADMIN_EMAIL must be a valid email address.");
 
+  for (const rule of [
+    { id: "default_cash_advance_level_1", entityType: "CASH_ADVANCE", level: 1, approverRole: "ACCOUNTS_HEAD" },
+    { id: "default_cash_advance_level_2", entityType: "CASH_ADVANCE", level: 2, approverRole: "FINANCE_HEAD" },
+    { id: "default_expense_level_1", entityType: "EXPENSE", level: 1, approverRole: "BRANCH_MANAGER" },
+    { id: "default_expense_level_2", entityType: "EXPENSE", level: 2, approverRole: "ACCOUNTS_HEAD" },
+  ]) await prisma.approvalRule.upsert({ where: { id: rule.id }, update: { ...rule, isActive: true }, create: rule });
+
   const existing = await prisma.user.findUnique({ where: { email }, select: { id: true } });
   if (existing) {
     console.log("Production Finance Head already exists; bootstrap seed skipped without changing its password.");

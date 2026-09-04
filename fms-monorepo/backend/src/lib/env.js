@@ -18,6 +18,11 @@ const schema = z.object({
   COOKIE_SECURE: z.enum(["true", "false"]).default("false"),
   BUDGET_ENFORCEMENT: z.enum(["warn", "block", "off"]).default("warn"),
   EMAIL_NOTIFICATIONS_ENABLED: z.enum(["true", "false"]).default("false"),
+  EMAIL_PROVIDER: z.enum(["disabled", "console", "resend", "sendgrid"]).default("disabled"),
+  EMAIL_API_KEY: optionalString,
+  EMAIL_FROM_ADDRESS: z.string().email().default("notifications@example.org"),
+  EMAIL_FROM_NAME: z.string().min(1).default("FMS Notifications"),
+  EMAIL_RATE_LIMIT_PER_HOUR: z.coerce.number().int().positive().default(20),
   STORAGE_PROVIDER: z.enum(["local", "s3"]).default("local"),
   STORAGE_BUCKET: optionalString,
   STORAGE_ACCESS_KEY: optionalString,
@@ -25,6 +30,9 @@ const schema = z.object({
   STORAGE_REGION: z.string().min(1).default("us-east-1"),
   STORAGE_ENDPOINT: optionalUrl,
 }).superRefine((value, context) => {
+  if (["resend", "sendgrid"].includes(value.EMAIL_PROVIDER) && !value.EMAIL_API_KEY) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ["EMAIL_API_KEY"], message: "EMAIL_API_KEY is required for the selected email provider." });
+  }
   if (value.STORAGE_PROVIDER === "s3") {
     for (const field of ["STORAGE_BUCKET", "STORAGE_ACCESS_KEY", "STORAGE_SECRET_KEY"]) {
       if (!value[field]) context.addIssue({ code: z.ZodIssueCode.custom, path: [field], message: `${field} is required for S3-compatible storage.` });

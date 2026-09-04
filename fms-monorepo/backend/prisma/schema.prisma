@@ -38,6 +38,17 @@ enum LedgerEntryType {
   DISBURSEMENT
   REFUND
   ADJUSTMENT
+  FUND_DEPOSIT
+}
+
+enum FundStatus {
+  ACTIVE
+  CLOSED
+}
+
+enum ApprovalEntityType {
+  CASH_ADVANCE
+  EXPENSE
 }
 
 enum NotificationType {
@@ -46,6 +57,7 @@ enum NotificationType {
   REJECTED
   DISBURSED
   SETTLED
+  FUND_THRESHOLD
 }
 
 model Branch {
@@ -59,6 +71,8 @@ model Branch {
   cashAdvances  CashAdvance[]
   expenses      Expense[]
   ledgerEntries LedgerEntry[]
+  fundAllocations FundAllocation[]
+  approvalRules   ApprovalRule[]
 
   @@index([isActive])
 }
@@ -80,6 +94,8 @@ model User {
   ledgerEntries LedgerEntry[]  @relation("LedgerCreator")
   auditLogs     AuditLog[]     @relation("AuditActor")
   notifications Notification[]
+  createdFunds   Fund[]           @relation("FundCreator")
+  emailNotificationsEnabled Boolean @default(true)
 
   @@index([branchId])
   @@index([role, isActive])
@@ -92,8 +108,27 @@ model ExpenseCategory {
   isActive  Boolean   @default(true)
   createdAt DateTime  @default(now())
   expenses  Expense[]
+  approvalRules ApprovalRule[]
 
   @@index([isActive])
+}
+
+model ApprovalRule {
+  id           String             @id @default(cuid())
+  entityType   ApprovalEntityType
+  level        Int
+  approverRole Role
+  branchId     String?
+  branch       Branch?            @relation(fields: [branchId], references: [id])
+  categoryId   String?
+  category     ExpenseCategory?   @relation(fields: [categoryId], references: [id])
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([entityType, branchId, categoryId, isActive, level])
+  @@index([branchId])
+  @@index([categoryId])
 }
 
 model CashAdvance {
@@ -111,10 +146,14 @@ model CashAdvance {
   approvalSteps ApprovalStep[]
   ledgerEntries LedgerEntry[]
   expenses      Expense[]
+  fundId         String?
+  fund           Fund?             @relation(fields: [fundId], references: [id])
+  approvalChain  Json?
 
   @@index([branchId, status])
   @@index([createdAt])
   @@index([requesterId])
+  @@index([fundId])
 }
 
 model Expense {
@@ -136,11 +175,15 @@ model Expense {
   updatedAt     DateTime        @updatedAt
   approvalSteps ApprovalStep[]
   ledgerEntries LedgerEntry[]
+  fundId         String?
+  fund           Fund?           @relation(fields: [fundId], references: [id])
+  approvalChain  Json?
 
   @@index([branchId, status])
   @@index([categoryId, expenseDate, status])
   @@index([cashAdvanceId])
   @@index([createdAt])
+  @@index([fundId])
 }
 
 model ApprovalStep {
@@ -176,11 +219,52 @@ model LedgerEntry {
   cashAdvance    CashAdvance?    @relation(fields: [cashAdvanceId], references: [id])
   expenseId      String?
   expense        Expense?        @relation(fields: [expenseId], references: [id])
+  fundId         String?
+  fund           Fund?           @relation(fields: [fundId], references: [id])
   createdAt      DateTime        @default(now())
 
   @@index([branchId, createdAt])
   @@index([cashAdvanceId])
   @@index([expenseId])
+  @@index([fundId])
+}
+
+model Fund {
+  id             String           @id @default(cuid())
+  donorName      String
+  grantName      String
+  totalAmount    Decimal          @db.Decimal(14, 2)
+  currency       String           @default("USD")
+  startDate      DateTime
+  endDate        DateTime
+  status         FundStatus       @default(ACTIVE)
+  notes          String?
+  createdById    String
+  createdBy      User             @relation("FundCreator", fields: [createdById], references: [id])
+  allocations    FundAllocation[]
+  cashAdvances   CashAdvance[]
+  expenses       Expense[]
+  ledgerEntries  LedgerEntry[]
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  @@index([status, startDate, endDate])
+  @@index([donorName])
+  @@index([createdById])
+}
+
+model FundAllocation {
+  id              String   @id @default(cuid())
+  fundId          String
+  fund            Fund     @relation(fields: [fundId], references: [id], onDelete: Cascade)
+  branchId        String
+  branch          Branch   @relation(fields: [branchId], references: [id])
+  allocatedAmount Decimal  @db.Decimal(14, 2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([fundId, branchId])
+  @@index([branchId])
 }
 
 model AuditLog {

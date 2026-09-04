@@ -6,6 +6,7 @@ import Button from "./ui/Button";
 
 type Category = { id: string; name: string; budgetCap: string };
 type Advance = { id: string; purpose: string; amount: string; status: string };
+type Fund = { id: string; grantName: string; donorName: string; currency: string; remaining: string };
 type Expense = {
   id: string;
   amount: string;
@@ -16,15 +17,16 @@ type Expense = {
   creator: { name: string };
   category: Category;
   cashAdvance: Advance | null;
-  approvalSteps: { level: number; status: string; approver: { name: string; role: Role } | null }[];
+  approvalSteps: { level: number; status: string; approver: { name: string; role: Role } | null }[]; nextRequiredRole: Role | null;
 };
 
-const visibleRoles: Role[] = ["DATA_ENTRY_OPERATOR", "BRANCH_MANAGER", "ACCOUNTS_HEAD", "FINANCE_HEAD", "AUDITOR"];
+const visibleRoles: Role[] = ["DATA_ENTRY_OPERATOR", "BRANCH_MANAGER", "ACCOUNTS_HEAD", "FINANCE_HEAD", "PROGRAM_OFFICER", "AUDITOR"];
 
 export default function ExpenseModule({ role, user }: { role: Role; user: SessionUser | null }) {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [advances, setAdvances] = useState<Advance[]>([]);
+  const [funds, setFunds] = useState<Fund[]>([]);
   const [workingId, setWorkingId] = useState("");
   const [receiptId, setReceiptId] = useState("");
   const [loading, setLoading] = useState(true);
@@ -34,20 +36,22 @@ export default function ExpenseModule({ role, user }: { role: Role; user: Sessio
 
   const load = useCallback(async () => {
     try {
-      const [expenseData, categoryData, advanceData] = await Promise.all([
+      const [expenseData, categoryData, advanceData, fundData] = await Promise.all([
         apiFetch<Expense[]>("/api/expenses"),
         apiFetch<Category[]>("/api/categories"),
         apiFetch<Advance[]>("/api/cash-advance"),
+        canCreate ? apiFetch<Fund[]>("/api/funds?status=ACTIVE") : Promise.resolve([]),
       ]);
       setExpenses(expenseData);
       setCategories(categoryData);
       setAdvances(advanceData.filter((item) => item.status === "DISBURSED"));
+      setFunds(fundData);
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "Could not load expenses" });
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [canCreate]);
 
   useEffect(() => { if (user && visibleRoles.includes(role)) load(); }, [user, role, load]);
 
@@ -111,9 +115,9 @@ export default function ExpenseModule({ role, user }: { role: Role; user: Sessio
   return <section className="phase-module expense-module">
     <div className="module-heading"><div><span>SECURE RECEIPTS</span><h2>Expense management</h2><p>{canCreate ? "Record an expense with its private receipt." : "Track and review branch expenses."}</p></div><strong>{expenses.filter((item) => item.status === "PENDING").length} pending</strong></div>
     {message && <div className={`inline-message ${message.type}`}>{message.text}</div>}
-    {canCreate && <form className="expense-form" onSubmit={submit}><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Category<select name="categoryId" required defaultValue=""><option value="" disabled>Select category</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name} · cap ${Number(item.budgetCap).toLocaleString()}</option>)}</select></label><label>Linked advance (optional)<select name="cashAdvanceId" defaultValue=""><option value="">No linked advance</option>{advances.map((item) => <option key={item.id} value={item.id}>{item.purpose} · ${Number(item.amount).toLocaleString()}</option>)}</select></label><label className="wide-field">Description<input name="description" minLength={3} maxLength={500} required /></label><label className="receipt-field">Receipt (JPG, PNG, WebP or PDF; max 5 MB)<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required /></label><Button type="submit" disabled={submitting}>{submitting ? "Uploading receipt…" : "Submit expense →"}</Button></form>}
+    {canCreate && <form className="expense-form" onSubmit={submit}><label>Amount<input name="amount" type="number" min="0.01" step="0.01" required /></label><label>Category<select name="categoryId" required defaultValue=""><option value="" disabled>Select category</option>{categories.map((item) => <option key={item.id} value={item.id}>{item.name} · cap ${Number(item.budgetCap).toLocaleString()}</option>)}</select></label><label>Linked advance (optional)<select name="cashAdvanceId" defaultValue=""><option value="">No linked advance</option>{advances.map((item) => <option key={item.id} value={item.id}>{item.purpose} · ${Number(item.amount).toLocaleString()}</option>)}</select></label><label>Fund override (optional)<select name="fundId" defaultValue=""><option value="">Inherit / unrestricted</option>{funds.map(f=><option key={f.id} value={f.id}>{f.grantName} · {f.currency} {Number(f.remaining).toLocaleString()} left</option>)}</select></label><label className="wide-field">Description<input name="description" minLength={3} maxLength={500} required /></label><label className="receipt-field">Receipt (JPG, PNG, WebP or PDF; max 5 MB)<input name="receipt" type="file" accept="image/jpeg,image/png,image/webp,application/pdf" required /></label><Button type="submit" disabled={submitting}>{submitting ? "Uploading receipt…" : "Submit expense →"}</Button></form>}
     <div className="advance-table-wrap"><table className="advance-table"><thead><tr><th>Branch</th><th>Creator</th><th>Category / description</th><th>Amount</th><th>Status</th><th>Receipt</th><th>Action</th></tr></thead><tbody>{loading ? <tr><td colSpan={7} className="empty-row">Loading expenses…</td></tr> : expenses.length === 0 ? <tr><td colSpan={7} className="empty-row">No expenses yet.</td></tr> : expenses.map((item) => {
-      const nextRole: Role | null = item.status === "PENDING" ? (item.approvalSteps.length === 0 ? "BRANCH_MANAGER" : "ACCOUNTS_HEAD") : null;
+      const nextRole = item.nextRequiredRole;
       const canAct = nextRole === role;
       return <tr key={item.id}><td><b>{item.branch.name}</b><small>{item.branch.code}</small></td><td>{item.creator.name}</td><td><b>{item.category.name}</b><small>{item.description}</small></td><td className="amount-cell">${Number(item.amount).toLocaleString()}</td><td><span className={`status-pill ${item.status.toLowerCase()}`}>{item.status}</span>{nextRole && <small>Next: {nextRole.replaceAll("_", " ")}</small>}</td><td><Button className="receipt-link" disabled={!item.hasReceipt || receiptId === item.id} onClick={() => viewReceipt(item.id)}>{receiptId === item.id ? "Signing…" : "View"}</Button></td><td><div className="row-actions">{canAct ? <><Button disabled={workingId === item.id} onClick={() => decide(item.id, "approve")}>Approve L{item.approvalSteps.length + 1}</Button><Button className="reject" disabled={workingId === item.id} onClick={() => decide(item.id, "reject")}>Reject</Button></> : nextRole ? <small>Waiting for role</small> : <small>Complete</small>}</div></td></tr>;
     })}</tbody></table></div>

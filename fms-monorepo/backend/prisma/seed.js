@@ -48,6 +48,13 @@ async function main() {
     await prisma.user.upsert({ where: { email: user.email }, update: data, create: { ...data, email: user.email } });
   }
 
+  for (const rule of [
+    { id: "default_cash_advance_level_1", entityType: "CASH_ADVANCE", level: 1, approverRole: "ACCOUNTS_HEAD" },
+    { id: "default_cash_advance_level_2", entityType: "CASH_ADVANCE", level: 2, approverRole: "FINANCE_HEAD" },
+    { id: "default_expense_level_1", entityType: "EXPENSE", level: 1, approverRole: "BRANCH_MANAGER" },
+    { id: "default_expense_level_2", entityType: "EXPENSE", level: 2, approverRole: "ACCOUNTS_HEAD" },
+  ]) await prisma.approvalRule.upsert({ where: { id: rule.id }, update: { ...rule, isActive: true }, create: rule });
+
   console.log("\nSeed complete. Development users:");
   for (const user of users) console.log(`${user.role.padEnd(20)} ${user.email.padEnd(32)} ${user.password ?? userPassword}`);
 }

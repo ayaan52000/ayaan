@@ -14,12 +14,15 @@ import AuditLogViewer from "./AuditLogViewer";
 import NotificationBell from "./NotificationBell";
 import ThemeSwitcher from "./ThemeSwitcher";
 import Button from "./ui/Button";
+import FundsModule from "./FundsModule";
+import SettingsModule from "./SettingsModule";
+import ApprovalRulesModule from "./ApprovalRulesModule";
 
 const roleNames: Record<Role, string> = {
   FINANCE_HEAD: "Finance Head", ACCOUNTS_HEAD: "Accounts Head", BRANCH_MANAGER: "Branch Manager",
   DATA_ENTRY_OPERATOR: "Data Entry", PROGRAM_OFFICER: "Program Officer", AUDITOR: "Auditor",
 };
-const icons = { dashboard: "⌂", advances: "↗", expenses: "▤", approvals: "✓", ledger: "◇", branches: "⌘", reports: "▥" };
+const icons = { dashboard: "⌂", advances: "↗", expenses: "▤", approvals: "✓", ledger: "◇", branches: "⌘", reports: "▥", funds: "$" };
 const chartData = [
   { month: "Jan", income: 74, expense: 42 }, { month: "Feb", income: 48, expense: 38 },
   { month: "Mar", income: 52, expense: 47 }, { month: "Apr", income: 70, expense: 51 },
@@ -28,7 +31,7 @@ const chartData = [
   { month: "Sep", income: 68, expense: 52 }, { month: "Oct", income: 88, expense: 60 },
 ];
 
-export type DashboardView = "overview" | "cash-advances" | "expenses" | "approvals" | "ledger" | "branches" | "reports" | "audit";
+export type DashboardView = "overview" | "cash-advances" | "expenses" | "approvals" | "ledger" | "branches" | "reports" | "audit" | "funds" | "settings" | "approval-rules";
 const rolePaths: Record<Role, string> = {
   FINANCE_HEAD: "finance-head", ACCOUNTS_HEAD: "accounts-head", BRANCH_MANAGER: "branch-manager",
   DATA_ENTRY_OPERATOR: "data-entry", PROGRAM_OFFICER: "program-officer", AUDITOR: "auditor",
@@ -51,8 +54,11 @@ export default function Dashboard({ role, view = "overview" }: { role: Role; vie
           <Link className={view === "cash-advances" ? "active" : ""} href={`${basePath}/cash-advances`}><span>{icons.advances}</span>Cash advances</Link><Link className={view === "expenses" ? "active" : ""} href={`${basePath}/expenses`}><span>{icons.expenses}</span>Expenses</Link>
           <Link className={view === "approvals" ? "active" : ""} href={`${basePath}/approvals`}><span>{icons.approvals}</span>Approvals</Link><Link className={view === "ledger" ? "active" : ""} href={`${basePath}/ledger`}><span>{icons.ledger}</span>Ledger</Link>
           <p>MANAGEMENT</p><Link className={view === "branches" ? "active" : ""} href={`${basePath}/branches`}><span>{icons.branches}</span>Branches</Link><Link className={view === "reports" ? "active" : ""} href={`${basePath}/reports`}><span>{icons.reports}</span>Reports</Link>
+          {["FINANCE_HEAD", "ACCOUNTS_HEAD", "AUDITOR"].includes(role) && <Link className={view === "funds" ? "active" : ""} href={`${basePath}/funds`}><span>{icons.funds}</span>Funds & grants</Link>}
           {(role === "AUDITOR" || role === "FINANCE_HEAD") && <Link className={view === "audit" ? "active" : ""} href={`${basePath}/audit`}><span>◎</span>Audit log</Link>}
           {role === "FINANCE_HEAD" && <a href="/register"><span>＋</span>Register user</a>}
+          {role === "FINANCE_HEAD" && <Link className={view === "approval-rules" ? "active" : ""} href={`${basePath}/approval-rules`}><span>⇅</span>Approval rules</Link>}
+          <Link className={view === "settings" ? "active" : ""} href={`${basePath}/settings`}><span>⚙</span>Settings</Link>
         </nav>
         <div className="side-profile"><div className="avatar">{user?.name?.[0] ?? "U"}</div><div><b>{user?.name ?? roleNames[role]}</b><small>{roleNames[role]}</small></div><Button onClick={logout} title="Sign out">↪</Button></div>
       </aside>
@@ -83,6 +89,9 @@ export default function Dashboard({ role, view = "overview" }: { role: Role; vie
         {view === "ledger" && <LedgerDashboard role={role} user={user} />}
         {view === "branches" && <BranchesModule role={role} user={user} />}
         {view === "reports" && <ReportsModule role={role} />}
+        {view === "funds" && <FundsModule role={role} />}
+        {view === "settings" && <SettingsModule />}
+        {view === "approval-rules" && <ApprovalRulesModule />}
         {view === "audit" && <AuditLogViewer role={role} user={user} />}
       </div>
     </section>
